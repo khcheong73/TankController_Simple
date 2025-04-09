@@ -42,6 +42,7 @@ https://github.com/khcheong73/TankController_Simple/blob/main/Schematic_RC-Tank-
 - **Backward Light**: Automatically turns on when both left and right analog sticks are pushed down (indicating reverse).
 - **Left/Right Turn Signal Lights**: Operate based on the analog stick controls for turning.
 - **LED Indicators**: Provide visual feedback for various states of the vehicle (e.g., headlight, auxiliary lights).
+- **Vibration while running**: Provide weak vibration while vehicle is running.
 
 ## License
 This code is provided for educational purposes. You are free to modify and use it as long as it is not for commercial purposes. Please give appropriate credit when using or modifying the code.
