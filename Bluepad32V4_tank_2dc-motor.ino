@@ -7,9 +7,9 @@
 //     1    pwm   L    pwm    reverse/brake at speed pwm %
 //     x    0     L    L      brake low
 
-ControllerPtr myControllers[BP32_MAX_GAMEPADS];
+// This code is optimized for Mini4WD Wild LunchBox with 2 DC motor
 
-// define variables
+ControllerPtr myControllers[BP32_MAX_GAMEPADS];
 
 // Assigning ports
 const int pinMotorPhaseL = 22;  // Motor phase M1 (FWD = 0, BWD = 1) (digitial output)
@@ -41,10 +41,6 @@ int stateLED_LT = LOW;     // Left turn signal state
 int stateLED_RT = LOW;     // Right turn signal state
 int stateLED_head = LOW;   // Headlight state
 int stateLED_back = LOW;   // Backward light state
-// int stateLED_EMRG   = LOW;  // Emergeny light state
-// int L_AUX1          = LOW;  // Aux. light #1 enable/disable   license plate light (works with headlight)
-// int L_AUX2          = LOW;  // Aux. light #2 enable/disable   fog light
-// int L_AUX3          = LOW;  // Aux. light #3 enable/disable   roof top light
 int stateLED_AUX1 = LOW;  // Aux. light #1 state  license plate light (works with headlight)
 int stateLED_AUX2 = LOW;  // Aux. light #2 state  fog light
 int stateLED_AUX3 = LOW;  // Aux. light #3 state  roof top light
@@ -52,6 +48,15 @@ int stateLED_AUX3 = LOW;  // Aux. light #3 state  roof top light
 // define time variables
 unsigned long timePrev = 0;
 unsigned long timePrev2 = 0;
+
+unsigned long timePrevLoop = 0;  // loop 실행 간격을 조절하기 위한 타이머
+const int LOOP_INTERVAL = 10;    // loop 주기를 10ms로 설정
+
+// 진동을 지속적으로 유지하기 위한 변수
+unsigned long timePrevRumble = 0;
+const int INTERVAL_RUMBLE = 100;  // 진동 업데이트 간격 (50ms)
+
+uint8_t weakRumble;
 
 int maxSpeed;               // 255 is the max.
 const long INTERVAL = 500;  // for LED blinking
@@ -84,7 +89,7 @@ void controlMotor(int Accel, int Y, int pinMotorPhase, int pinMotorPWM) {
   if (speed == 256) speed = 255;
   digitalWrite(pinMotorPhase, mPhase);
   analogWrite(pinMotorPWM, speed);
-  Serial.printf("Phase %d/%3d speed %d/%3d ", pinMotorPhase, mPhase, pinMotorPWM, speed);
+  Serial.printf("Phase %d/%3d speed %d/%3d Rumble %d", pinMotorPhase, mPhase, pinMotorPWM, speed, weakRumble);
 }
 
 // control DC motor - left
@@ -101,8 +106,7 @@ void setMotorR(int Accel, int Y) {
 
 // control LED
 void updateLEDState(int &stateLED, unsigned long &prevTime, int pin, int interval) {
-  unsigned long timeNow = millis();
-  if (timeNow - prevTime >= interval) {
+  if (millis() - prevTime >= interval) {
     //    prevTime = timeNow;
     stateLED = !stateLED;
   }
@@ -110,27 +114,23 @@ void updateLEDState(int &stateLED, unsigned long &prevTime, int pin, int interva
 }
 
 void turnSignalControl() {
-  unsigned long timeNow;
   if (EMERGENCY == HIGH) {  // Emergency mode
-    unsigned long timeNow = millis();
-    if (timeNow - timePrev >= INTERVAL) {
-      timePrev = timeNow;
+    if (millis() - timePrev >= INTERVAL) {
+      timePrev = millis();
       stateLED_LT = !stateLED_LT;
       stateLED_RT = !stateLED_RT;
     }
   } else {  // Normal mode
     if (LT_TURN == HIGH) {
-      timeNow = millis();
-      if (timeNow - timePrev >= INTERVAL) {
-        timePrev = timeNow;
+      if (millis() - timePrev >= INTERVAL) {
+        timePrev = millis();
         stateLED_LT = !stateLED_LT;
         stateLED_RT = LOW;
       }
     } else stateLED_LT = LOW;
     if (RT_TURN == HIGH) {
-      timeNow = millis();
-      if (timeNow - timePrev >= INTERVAL) {
-        timePrev = timeNow;
+      if (millis() - timePrev >= INTERVAL) {
+        timePrev = millis();
         stateLED_LT = LOW;
         stateLED_RT = !stateLED_RT;
       }
@@ -182,6 +182,9 @@ void onConnectedController(ControllerPtr ctl) {
                     properties.product_id);
       myControllers[i] = ctl;
       foundEmptySlot = true;
+      // 🔹 연결 시 짧게 진동 (약한 모터 사용, 300ms 동안)
+      ctl->playDualRumble(0, 300, 80, 0);  // 약한 모터 80 강도로 300ms 동안 진동
+
       break;
     }
   }
@@ -262,57 +265,6 @@ void dumpBalanceBoard(ControllerPtr ctl) {
 */
 
 void processGamepad(ControllerPtr ctl) {
-  // There are different ways to query whether a button is pressed.
-  // By query each button individually:
-  //  a(), b(), x(), y(), l1(), etc...
-  //    if (ctl->a()) {
-  //        static int colorIdx = 0;
-  //        // Some gamepads like DS4 and DualSense support changing the color LED.
-  //        // It is possible to change it by calling:
-  //        switch (colorIdx % 3) {
-  //            case 0:
-  //                // Red
-  //                ctl->setColorLED(255, 0, 0);
-  //                break;
-  //            case 1:
-  //                // Green
-  //                ctl->setColorLED(0, 255, 0);
-  //                break;
-  //            case 2:
-  //                // Blue
-  //                ctl->setColorLED(0, 0, 255);
-  //                break;
-  //        }
-  //        colorIdx++;
-  //    }
-
-  //    if (ctl->b()) {
-  //        // Turn on the 4 LED. Each bit represents one LED.
-  //        static int led = 0;
-  //        led++;
-  //        // Some gamepads like the DS3, DualSense, Nintendo Wii, Nintendo Switch
-  //        // support changing the "Player LEDs": those 4 LEDs that usually indicate
-  //        // the "gamepad seat".
-  //        // It is possible to change them by calling:
-  //        ctl->setPlayerLEDs(led & 0x0f);
-  //    }
-
-  //    if (ctl->x()) {
-  //        // Some gamepads like DS3, DS4, DualSense, Switch, Xbox One S, Stadia support rumble.
-  //        // It is possible to set it by calling:
-  //        // Some controllers have two motors: "strong motor", "weak motor".
-  //        // It is possible to control them independently.
-  //        ctl->playDualRumble(0 /* delayedStartMs */, 250 /* durationMs */, 0x80 /* weakMagnitude */,
-  //                            0x40 /* strongMagnitude */);
-  //    }
-
-  // Another way to query controller data is by getting the buttons() function.
-  // See how the different "dump*" functions dump the Controller info.
-  // dumpGamepad(ctl);
-
-  // Kevin's addition
-
-  unsigned long timeNow2 = millis();
   int LX = ctl->axisX();
   int LY = ctl->axisY();
   int RX = ctl->axisRX();
@@ -327,118 +279,62 @@ void processGamepad(ControllerPtr ctl) {
   bool btn_r1 = ctl->r1();
   bool btn_thumbL = ctl->thumbL();
   bool btn_thumbR = ctl->thumbR();
-  /*
-  switch (true) {
-    case btn_x:                                 // toggle fog light
-      toggleLight(pinLEDaux2, &stateLED_AUX2);
-      break;
-    case btn_o:                                 // toggle headlight
-      stateLED_AUX1 = stateLED_head;
-      toggleLight(pinLEDhead, &stateLED_head);  // toggle headlight
-      toggleLight(pinLEDaux1, &stateLED_AUX1);  // toggle license plate light
-      break;
-    case btn_sq:                                // toggle rooftop light
-      toggleLight(pinLEDaux3, &stateLED_AUX3);
-      break;
-    case btn_tr:                                // toggle emergency mode
-      EMERGENCY = !EMERGENCY;
-      break;
-  }
-*/
-  if ((btn_x) && ( timeNow2 - timePrev2 > delayBtn )) {  // toggle fog light
+
+  if ((btn_x) && (millis() - timePrev2 > delayBtn)) {  // toggle fog light
     toggleLight(pinLEDaux2, stateLED_AUX2);
-    timePrev2 = timeNow2;
+    timePrev2 = millis();
   }
-  if ((btn_o) && ( timeNow2 - timePrev2 > delayBtn )) {  // toggle headlight
+  if ((btn_o) && (millis() - timePrev2 > delayBtn)) {  // toggle headlight
     stateLED_AUX1 = stateLED_head;
     toggleLight(pinLEDhead, stateLED_head);  // toggle headlight
     toggleLight(pinLEDaux1, stateLED_AUX1);  // toggle license plate light
-    timePrev2 = timeNow2;
+    timePrev2 = millis();
   }
-  if ((btn_sq) && ( timeNow2 - timePrev2 > delayBtn )) {  // toggle rooftop light
+  if ((btn_sq) && (millis() - timePrev2 > delayBtn)) {  // toggle rooftop light
     toggleLight(pinLEDaux3, stateLED_AUX3);
-    timePrev2 = timeNow2;
+    timePrev2 = millis();
   }
-  if ((btn_tr) && ( timeNow2 - timePrev2 > delayBtn )) {  // toggle emergency mode
-      EMERGENCY = !EMERGENCY;
-      timePrev2 = timeNow2;
+  if ((btn_tr) && (millis() - timePrev2 > delayBtn)) {  // toggle emergency mode
+    EMERGENCY = !EMERGENCY;
+    timePrev2 = millis();
   }
 
-  if (Acc < 10) stateLED_brake=HIGH;
-  else stateLED_brake=LOW;
+  if (Acc < 10) stateLED_brake = HIGH;
+  else stateLED_brake = LOW;
   digitalWrite(pinLEDbrake, stateLED_brake);
 
   setMotorL(Acc, LY);
   setMotorR(Acc, RY);
   backwardLightControl(LY, RY);
-  // if (LY > 10 && RY > 10) backward (lower)
+
   // LY upper, RY 0 or lower --> Right turn
   if (LY < -10 && RY >= 0) {
     RT_TURN = HIGH;
-  }
-  else RT_TURN = LOW;
+  } else RT_TURN = LOW;
   // LY 0 or lower, RY upper --> Left turn
   if (LY >= 0 && RY < -10) {
     LT_TURN = HIGH;
-  }
-  else LT_TURN = LOW;
+  } else LT_TURN = LOW;
   turnSignalControl();
 
-  //  setMotorL(Acc, LY);
-  //  setMotorR(Acc, RY);
-  //  backwardLightControl(LY, RY);
+  // 🔹 Acc 값에 따라 진동 조절 🔹
+  if (abs(LY) > 10 && abs(RY) > 10 & Acc > 10) {
+    weakRumble = map(Acc, 0, 1023, 0, 16);  // 약한 모터: 0~128
+
+    // 진동이 끊기지 않도록 주기적으로 업데이트
+    if (millis() - timePrevRumble >= INTERVAL_RUMBLE) {
+      timePrevRumble = millis();
+
+      if (Acc < 10) {
+        weakRumble = 0;  // 정지 시 진동 없음
+      } else {
+        ctl->playDualRumble(0, INTERVAL_RUMBLE, weakRumble, 0);  // 약한 모터만 지속적으로 동작
+      }
+    }
+  }
 
   Serial.printf(" HL:%d\t BL:%d\t BR:%d\t LL:%d\t RL:%d\t A1:%d\t A2:%d\t A3:%d\n", stateLED_head, stateLED_back, stateLED_brake, stateLED_LT, stateLED_RT, stateLED_AUX1, stateLED_AUX2, stateLED_AUX3);
 }
-
-/*
-void processMouse(ControllerPtr ctl) {
-    // This is just an example.
-    if (ctl->scrollWheel() > 0) {
-        // Do Something
-    } else if (ctl->scrollWheel() < 0) {
-        // Do something else
-    }
-
-    // See "dumpMouse" for possible things to query.
-    dumpMouse(ctl);
-}
-
-void processKeyboard(ControllerPtr ctl) {
-    // This is just an example.
-    if (ctl->isKeyPressed(Keyboard_A)) {
-        // Do Something
-        Serial.println("Key 'A' pressed");
-    }
-
-    // Don't do "else" here.
-    // Multiple keys can be pressed at the same time.
-    if (ctl->isKeyPressed(Keyboard_LeftShift)) {
-        // Do something else
-        Serial.println("Key 'LEFT SHIFT' pressed");
-    }
-
-    // Don't do "else" here.
-    // Multiple keys can be pressed at the same time.
-    if (ctl->isKeyPressed(Keyboard_LeftArrow)) {
-        // Do something else
-        Serial.println("Key 'Left Arrow' pressed");
-    }
-
-    // See "dumpKeyboard" for possible things to query.
-    dumpKeyboard(ctl);
-}
-
-void processBalanceBoard(ControllerPtr ctl) {
-    // This is just an example.
-    if (ctl->topLeft() > 10000) {
-        // Do Something
-    }
-
-    // See "dumpBalanceBoard" for possible things to query.
-    dumpBalanceBoard(ctl);
-}
-*/
 
 void processControllers() {
   for (auto myController : myControllers) {
@@ -484,15 +380,6 @@ void setup() {
   // By default, it is disabled.
   BP32.enableVirtualDevice(false);
 
-  //  bool btn_a = false;
-  //  bool btn_b = false;
-  //  bool btn_x = false;
-  //  bool btn_y = false;
-  //  bool btn_l1 = false;
-  //  bool btn_r1 = false;
-  //  bool btn_thumbL = false;
-  //  bool btn_thumbR = false;
-
   // Defining pin mode for I/O
   pinMode(pinLEDhead, OUTPUT);
   pinMode(pinLEDbrake, OUTPUT);
@@ -515,17 +402,17 @@ void setup() {
 // Arduino loop function. Runs in CPU 1.
 void loop() {
   // This call fetches all the controllers' data.
-  // Call this function in your main loop.
-  bool dataUpdated = BP32.update();
-  if (dataUpdated)
-    processControllers();
+  // Call this function in your main loop. unsigned long timeNow = millis();
+  if (millis() - timePrevLoop >= LOOP_INTERVAL) {
+    timePrevLoop = millis();
 
-  // The main loop must have some kind of "yield to lower priority task" event.
-  // Otherwise, the watchdog will get triggered.
-  // If your main loop doesn't have one, just add a simple `vTaskDelay(1)`.
-  // Detailed info here:
-  // https://stackoverflow.com/questions/66278271/task-watchdog-got-triggered-the-tasks-did-not-reset-the-watchdog-in-time
+    // 블루투스 컨트롤러 업데이트
+    bool dataUpdated = BP32.update();
+    if (dataUpdated) {
+      processControllers();
+    }
+  }
 
-  //     vTaskDelay(1);
-  delay(250);
+  // 블루투스 작업이 끊기지 않도록 적절한 딜레이 유지
+  vTaskDelay(1);  // 1ms 정도만 CPU 양보
 }
